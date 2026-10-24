@@ -1,0 +1,12 @@
+[package]
+name = "revp-mod-cache"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "revp module: in-memory HTTP response cache built on pingora-cache"
+
+[dependencies]
+revp-core = { path = "../../revp-core" }
+serde = { workspace = true }
+humantime-serde = { workspace = true }
+log = { workspace = true }

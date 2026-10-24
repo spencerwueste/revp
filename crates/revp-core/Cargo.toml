@@ -1,0 +1,30 @@
+[package]
+name = "revp-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+pingora-core = { workspace = true }
+pingora-proxy = { workspace = true }
+pingora-http = { workspace = true }
+pingora-cache = { workspace = true }
+pingora-load-balancing = { workspace = true }
+pingora-error = { workspace = true }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-pemfile = "2"
+rustls-pki-types = "1"
+tokio = { workspace = true }
+async-trait = { workspace = true }
+arc-swap = { workspace = true }
+matchit = { workspace = true }
+serde = { workspace = true }
+toml = { workspace = true }
+anyhow = { workspace = true }
+bytes = { workspace = true }
+http = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+humantime-serde = { workspace = true }
+parking_lot = { workspace = true }
+notify = { workspace = true }

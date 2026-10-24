@@ -1,0 +1,35 @@
+[package]
+name = "revp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "A lean, modular reverse proxy built on Pingora"
+
+[[bin]]
+name = "revp"
+path = "src/main.rs"
+
+[features]
+# Bare proxy: routing, load balancing, health checks, TLS, L4, hot reload.
+default = ["full"]
+full = ["metrics", "accesslog", "ratelimit", "headers", "cache", "compress", "acme"]
+metrics = ["dep:revp-mod-metrics"]
+accesslog = ["dep:revp-mod-accesslog"]
+ratelimit = ["dep:revp-mod-ratelimit"]
+headers = ["dep:revp-mod-headers"]
+cache = ["dep:revp-mod-cache"]
+compress = ["dep:revp-mod-compress"]
+acme = ["dep:revp-acme"]
+
+[dependencies]
+revp-core = { path = "../revp-core" }
+revp-mod-metrics = { path = "../modules/revp-mod-metrics", optional = true }
+revp-mod-accesslog = { path = "../modules/revp-mod-accesslog", optional = true }
+revp-mod-ratelimit = { path = "../modules/revp-mod-ratelimit", optional = true }
+revp-mod-headers = { path = "../modules/revp-mod-headers", optional = true }
+revp-mod-cache = { path = "../modules/revp-mod-cache", optional = true }
+revp-mod-compress = { path = "../modules/revp-mod-compress", optional = true }
+revp-acme = { path = "../revp-acme", optional = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }

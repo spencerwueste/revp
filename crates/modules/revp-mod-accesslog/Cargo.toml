@@ -1,0 +1,14 @@
+[package]
+name = "revp-mod-accesslog"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "revp module: JSON-lines access logs written off the request path"
+
+[dependencies]
+revp-core = { path = "../../revp-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+parking_lot = { workspace = true }
+chrono = { workspace = true }

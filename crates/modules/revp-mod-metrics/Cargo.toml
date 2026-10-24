@@ -1,0 +1,10 @@
+[package]
+name = "revp-mod-metrics"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "revp module: per-route request metrics served on /metrics in Prometheus text format"
+
+[dependencies]
+revp-core = { path = "../../revp-core" }
+parking_lot = { workspace = true }

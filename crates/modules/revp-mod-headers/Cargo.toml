@@ -1,0 +1,10 @@
+[package]
+name = "revp-mod-headers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "revp module: set/remove request and response headers"
+
+[dependencies]
+revp-core = { path = "../../revp-core" }
+serde = { workspace = true }

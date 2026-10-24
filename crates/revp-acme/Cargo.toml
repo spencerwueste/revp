@@ -1,0 +1,8 @@
+[package]
+name = "revp-acme"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+revp-core = { path = "../revp-core" }

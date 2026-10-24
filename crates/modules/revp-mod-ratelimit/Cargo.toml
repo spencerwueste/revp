@@ -1,0 +1,12 @@
+[package]
+name = "revp-mod-ratelimit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "revp module: per-client token-bucket rate limiting"
+
+[dependencies]
+revp-core = { path = "../../revp-core" }
+serde = { workspace = true }
+parking_lot = { workspace = true }
+ahash = { workspace = true }

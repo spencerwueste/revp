@@ -1,0 +1,17 @@
+# M0 benchmark: bare pass-through, no modules.
+[server]
+threads = 0
+log_level = "warn"
+pid_file = "/tmp/revp-bench.pid"
+upgrade_sock = "/tmp/revp-bench-upgrade.sock"
+watch_config = false
+
+[[listeners]]
+addr = "127.0.0.1:18080"
+
+[upstreams.origin]
+servers = ["127.0.0.1:13000"]
+
+[[routes]]
+name = "all"
+upstream = "origin"

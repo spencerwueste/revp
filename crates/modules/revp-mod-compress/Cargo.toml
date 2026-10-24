@@ -1,0 +1,10 @@
+[package]
+name = "revp-mod-compress"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "revp module: gzip/brotli/zstd response compression"
+
+[dependencies]
+revp-core = { path = "../../revp-core" }
+serde = { workspace = true }
