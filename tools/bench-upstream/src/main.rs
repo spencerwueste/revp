@@ -95,7 +95,20 @@ async fn serve(args: Args) {
                     let req = &buf[..end];
                     let close = contains_ci(req, b"connection: close");
                     hits.fetch_add(1, Ordering::Relaxed);
-                    if sock.write_all(&response).await.is_err() {
+                    // `/echo` returns the raw request head so tests can inspect
+                    // what the proxy forwarded (Host, X-Forwarded-*, path).
+                    let out: std::borrow::Cow<[u8]> = if req.starts_with(b"GET /echo") {
+                        let mut v = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n",
+                            req.len()
+                        )
+                        .into_bytes();
+                        v.extend_from_slice(req);
+                        v.into()
+                    } else {
+                        (&response[..]).into()
+                    };
+                    if sock.write_all(&out).await.is_err() {
                         return;
                     }
                     if close {

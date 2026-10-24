@@ -1,0 +1,37 @@
+# systemd unit for revp.
+#   install -m 755 target/release/revp /usr/local/bin/revp
+#   install -m 644 deploy/revp.service /etc/systemd/system/
+#   mkdir -p /etc/revp /var/lib/revp && cp examples/revp.toml /etc/revp/
+#   systemctl enable --now revp
+#
+# Reload routes/upstreams/certs without dropping connections:  systemctl reload revp
+# Zero-downtime binary upgrade (Linux):                       revp -c /etc/revp/revp.toml --upgrade
+#   (the new process takes over the listening sockets, then the old one exits
+#    after draining; see deploy/upgrade.sh)
+
+[Unit]
+Description=revp reverse proxy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/revp -c /etc/revp/revp.toml
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=2s
+LimitNOFILE=1048576
+# Binding :80/:443 without root:
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+User=revp
+Group=revp
+StateDirectory=revp
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/revp /tmp
+PrivateTmp=false
+
+[Install]
+WantedBy=multi-user.target

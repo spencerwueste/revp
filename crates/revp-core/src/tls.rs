@@ -149,7 +149,19 @@ pub fn certified_key_from_pem(cert_pem: &[u8], key_pem: &[u8]) -> anyhow::Result
     let key: PrivateKeyDer<'static> = rustls_pemfile::private_key(&mut &key_pem[..])
         .context("parsing private key PEM")?
         .ok_or_else(|| anyhow::anyhow!("no private key found in PEM"))?;
-    let signing = rustls::crypto::ring::sign::any_supported_type(&key)
-        .map_err(|e| anyhow::anyhow!("unsupported key type: {e}"))?;
+    let signing = rustls::crypto::ring::sign::any_supported_type(&key).map_err(|e| {
+        let hint = match &key {
+            PrivateKeyDer::Sec1(_) => {
+                " (SEC1 \"EC PRIVATE KEY\" is not supported; convert with \
+                 `openssl pkcs8 -topk8 -nocrypt -in key.pem -out key-pkcs8.pem`)"
+            }
+            PrivateKeyDer::Pkcs8(_) => {
+                " (PKCS#8 EC keys must use a named curve: generate with \
+                 `-pkeyopt ec_param_enc:named_curve`, or use RSA/Ed25519)"
+            }
+            _ => "",
+        };
+        anyhow::anyhow!("unsupported private key: {e}{hint}")
+    })?;
     Ok(CertifiedKey::new(certs, signing))
 }

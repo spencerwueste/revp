@@ -17,10 +17,7 @@ use std::sync::Arc;
 
 use revp_core::pingora_core::modules::http::compression::ResponseCompression;
 use revp_core::pingora_core::protocols::http::compression::Algorithm;
-use revp_core::{
-    async_trait, parse_module_config, BuildCtx, Ctx, Flow, Module, ModuleFactory, Phases, Result,
-    Session,
-};
+use revp_core::{async_trait, parse_module_config, BuildCtx, Ctx, Module, ModuleFactory, Phases, Session};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -57,10 +54,11 @@ impl Module for Compress {
         "compress"
     }
     fn phases(&self) -> Phases {
-        Phases::REQUEST
+        // Must run before Pingora's compression module inspects Accept-Encoding.
+        Phases::EARLY_REQUEST
     }
 
-    async fn on_request(&self, s: &mut Session, _cx: &mut Ctx) -> Result<Flow> {
+    fn on_early_request(&self, s: &mut Session, _cx: &mut Ctx) {
         if let Some(c) = s.downstream_modules_ctx.get_mut::<ResponseCompression>() {
             c.adjust_level(self.level);
             for (algo, lvl) in &self.per_algo {
@@ -70,7 +68,6 @@ impl Module for Compress {
                 c.adjust_decompression(true);
             }
         }
-        Ok(Flow::Continue)
     }
 }
 

@@ -121,6 +121,8 @@ pub struct AcmeCfg {
     pub staging: bool,
     /// Override the ACME directory URL entirely.
     pub directory: Option<String>,
+    /// Extra root CA (PEM) to trust when talking to the directory. For private CAs / Pebble.
+    pub ca_root: Option<PathBuf>,
     pub storage: PathBuf,
     pub renew_before_days: u32,
 }
@@ -133,6 +135,7 @@ impl Default for AcmeCfg {
             domains: vec![],
             staging: false,
             directory: None,
+            ca_root: None,
             storage: "/var/lib/revp/acme".into(),
             renew_before_days: 30,
         }

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
-use log::{debug, info, warn};
+use log::{debug, info};
 use pingora_core::protocols::ALPN;
 use pingora_core::upstreams::peer::HttpPeer;
 use pingora_load_balancing::discovery::Static;
@@ -184,8 +184,6 @@ impl UpstreamPool {
 
 impl Drop for UpstreamPool {
     fn drop(&mut self) {
-        if self.hc_interval.is_some() {
-            warn!("upstream pool {:?} dropped", self.name);
-        }
+        debug!("upstream pool {:?} (old generation) dropped", self.name);
     }
 }

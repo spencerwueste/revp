@@ -80,6 +80,27 @@ impl ProxyHttp for RevpProxy {
         Ctx::new()
     }
 
+    /// Routing happens here so that modules can configure Pingora's built-in
+    /// downstream modules (compression) before those see the request.
+    async fn early_request_filter(&self, session: &mut Session, cx: &mut Ctx) -> Result<()> {
+        let route = {
+            let rt = self.shared.runtime();
+            rt.router.match_request(session.req_header())
+        };
+        let Some(route) = route else { return Ok(()) };
+        if let Some(t) = route.downstream_read_timeout {
+            session.set_read_timeout(Some(t));
+        }
+        if let Some(t) = route.downstream_write_timeout {
+            session.set_write_timeout(Some(t));
+        }
+        for m in route.pipeline.early_request.iter() {
+            m.on_early_request(session, cx);
+        }
+        cx.route = Some(route);
+        Ok(())
+    }
+
     async fn request_filter(&self, session: &mut Session, cx: &mut Ctx) -> Result<bool> {
         if session.req_header().uri.path().starts_with(CHALLENGE_PREFIX)
             && !self.shared.acme.is_empty()
@@ -88,24 +109,12 @@ impl ProxyHttp for RevpProxy {
             return Ok(true);
         }
 
-        let route = {
-            let rt = self.shared.runtime();
-            rt.router.match_request(session.req_header())
-        };
-        let Some(route) = route else {
+        let Some(route) = cx.route.clone() else {
             cx.status = 404;
             cx.short_circuit = Some("no_route");
             session.respond_error(404).await?;
             return Ok(true);
         };
-
-        if let Some(t) = route.downstream_read_timeout {
-            session.set_read_timeout(Some(t));
-        }
-        if let Some(t) = route.downstream_write_timeout {
-            session.set_write_timeout(Some(t));
-        }
-        cx.route = Some(route.clone());
 
         for m in route.pipeline.request.iter() {
             if m.on_request(session, cx).await? == Flow::Done {

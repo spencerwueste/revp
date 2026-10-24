@@ -1,0 +1,26 @@
+# Podman Quadlet unit. Copy to /etc/containers/systemd/revp.container
+# (or ~/.config/containers/systemd/ for rootless), then:
+#   systemctl daemon-reload && systemctl start revp
+[Unit]
+Description=revp reverse proxy (container)
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=localhost/revp:latest
+ContainerName=revp
+PublishPort=80:80
+PublishPort=443:443
+PublishPort=127.0.0.1:9090:9090
+Volume=/etc/revp/revp.toml:/etc/revp/revp.toml:ro,Z
+Volume=revp-acme:/var/lib/revp:Z
+# Let the container bind 80/443 as a non-root user.
+AddCapability=NET_BIND_SERVICE
+# Config hot-reload works through the bind mount; `podman kill -s HUP revp` also works.
+
+[Service]
+Restart=on-failure
+TimeoutStartSec=60
+
+[Install]
+WantedBy=multi-user.target default.target

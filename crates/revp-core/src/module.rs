@@ -35,6 +35,9 @@ impl Phases {
     pub const LOG: Phases = Phases(1 << 4);
     /// Cache hooks. At most one module per route may own this phase.
     pub const CACHE: Phases = Phases(1 << 5);
+    /// `on_early_request` — right after routing, before Pingora's built-in
+    /// downstream modules (compression) see the request. Use only to configure those.
+    pub const EARLY_REQUEST: Phases = Phases(1 << 6);
 
     pub const fn union(self, o: Phases) -> Phases {
         Phases(self.0 | o.0)
@@ -65,6 +68,9 @@ pub enum Flow {
 pub trait Module: Send + Sync + 'static {
     fn name(&self) -> &'static str;
     fn phases(&self) -> Phases;
+
+    /// Runs before Pingora's downstream modules. Cannot respond; only configure.
+    fn on_early_request(&self, _session: &mut Session, _cx: &mut Ctx) {}
 
     async fn on_request(&self, _session: &mut Session, _cx: &mut Ctx) -> Result<Flow> {
         Ok(Flow::Continue)
@@ -228,6 +234,7 @@ impl Registry {
 #[derive(Default)]
 pub struct Pipeline {
     pub all: Box<[Arc<dyn Module>]>,
+    pub early_request: Box<[Arc<dyn Module>]>,
     pub request: Box<[Arc<dyn Module>]>,
     pub upstream_request: Box<[Arc<dyn Module>]>,
     pub response: Box<[Arc<dyn Module>]>,
@@ -261,6 +268,7 @@ impl Pipeline {
             .iter()
             .fold(Phases::NONE, |acc, m| acc | m.phases());
         Ok(Self {
+            early_request: pick(Phases::EARLY_REQUEST),
             request: pick(Phases::REQUEST),
             upstream_request: pick(Phases::UPSTREAM_REQUEST),
             response: pick(Phases::RESPONSE),

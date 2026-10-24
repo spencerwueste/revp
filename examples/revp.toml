@@ -1,0 +1,103 @@
+# revp example configuration. Every key shown with its default unless noted.
+
+[server]
+threads = 0                          # 0 = one worker per CPU core
+log_level = "info"
+pid_file = "/tmp/revp.pid"
+upgrade_sock = "/tmp/revp_upgrade.sock"
+grace_period = "5s"                  # keep serving open connections after SIGTERM/SIGQUIT
+graceful_shutdown_timeout = "5s"
+upstream_keepalive_pool_size = 256
+watch_config = true                  # hot reload when this file changes (SIGHUP also works)
+
+# ---- listeners (fixed at startup; change = restart or --upgrade) ----
+[[listeners]]
+addr = "0.0.0.0:80"
+
+[[listeners]]
+addr = "0.0.0.0:443"
+tls = true
+h2 = true                            # HTTP/2 via ALPN
+reuseport = false
+
+# ---- TLS: manual certs and/or automatic Let's Encrypt ----
+[tls]
+certs = [
+  # { hosts = ["example.com", "*.example.com"], cert = "/etc/revp/certs/example.pem", key = "/etc/revp/certs/example.key" },
+]
+
+[acme]
+enabled = false
+email = "ops@example.com"
+domains = ["example.com", "www.example.com"]
+staging = false                      # true while testing (no rate limits, untrusted certs)
+storage = "/var/lib/revp/acme"
+renew_before_days = 30
+
+# ---- admin: health, upstream status, /metrics, POST /reload ----
+[admin]
+listen = "127.0.0.1:9090"
+
+# ---- module settings applied to every route (routes can override) ----
+[defaults.modules]
+metrics = {}
+accesslog = { output = "stdout" }
+
+# ---- upstreams ----
+[upstreams.web]
+servers = ["10.0.0.11:8080", { addr = "10.0.0.12:8080", weight = 2 }]
+lb = "round_robin"                   # round_robin | random | consistent_hash
+hash_on = "ip"                       # for consistent_hash: ip | path | uri | { header = "x-user" }
+tls = false
+verify_cert = true
+http_version = "1"                   # "2" for gRPC / h2c backends
+connect_timeout = "5s"
+read_timeout = "60s"
+write_timeout = "60s"
+idle_timeout = "90s"
+health_check = { kind = "http", path = "/healthz", interval = "5s", consecutive_failure = 2 }
+
+[upstreams.grpc]
+servers = ["10.0.0.20:50051"]
+http_version = "2"
+health_check = { kind = "tcp", interval = "10s" }
+
+[upstreams.postgres]
+servers = ["10.0.0.30:5432"]
+
+# ---- HTTP routes: first match by host (exact > wildcard > any), then longest path ----
+[[routes]]
+name = "api"
+hosts = ["api.example.com"]
+paths = ["/v1/*"]
+upstream = "web"
+strip_prefix = "/v1"
+host_header = "preserve"             # preserve | upstream | "literal.host"
+forwarded_headers = true             # X-Forwarded-For/Proto/Host, X-Real-IP
+[routes.modules.ratelimit]
+rps = 100
+burst = 200
+key = "ip"                           # or "header:x-api-key"
+[routes.modules.headers]
+response.set = { x-frame-options = "DENY" }
+response.remove = ["server"]
+
+[[routes]]
+name = "grpc"
+hosts = ["grpc.example.com"]
+upstream = "grpc"
+
+[[routes]]
+name = "site"
+hosts = ["example.com", "www.example.com"]
+upstream = "web"
+[routes.modules.cache]
+ttl = "60s"
+max_size = "256MB"
+[routes.modules.compress]
+level = 6
+
+# ---- raw TCP (layer 4) ----
+[[l4]]
+listen = "0.0.0.0:5432"
+upstream = "postgres"
