@@ -283,6 +283,14 @@ impl ProxyHttp for RevpProxy {
         Ok(None)
     }
 
+    /// Clients hanging up mid-request is normal traffic, not an error worth a log line.
+    fn suppress_error_log(&self, _session: &Session, _cx: &Ctx, e: &Error) -> bool {
+        use pingora_error::ErrorSource::Downstream;
+        use pingora_error::ErrorType::{ConnectionClosed, ReadError, WriteError};
+        e.esource() == &Downstream
+            && matches!(e.etype(), ConnectionClosed | ReadError | WriteError)
+    }
+
     async fn logging(&self, session: &mut Session, e: Option<&Error>, cx: &mut Ctx) {
         if let Some(r) = session.response_written() {
             cx.status = r.status.as_u16();

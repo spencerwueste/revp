@@ -32,7 +32,10 @@ pub struct CliOpts {
 }
 
 pub fn init_logging(level: &str) {
-    let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(level))
+    // rustls warns on every handshake whose SNI is an IP literal (load testers,
+    // health checkers); that's not actionable, so keep it at error.
+    let filter = format!("{level},rustls::msgs::handshake=error");
+    let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(&filter))
         .format_timestamp_millis()
         .try_init();
 }

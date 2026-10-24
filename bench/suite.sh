@@ -23,25 +23,24 @@ if [[ ! -f "$ROOT/bench/certs/cert.pem" ]]; then
 fi
 
 PIDS=()
-cleanup() { for p in "${PIDS[@]}"; do kill "$p" 2>/dev/null; done; wait 2>/dev/null; }
+# ${PIDS[@]+...} keeps bash 3.2 (macOS) happy under set -u when the array is empty.
+cleanup() { for p in ${PIDS[@]+"${PIDS[@]}"}; do kill "$p" 2>/dev/null; done; wait 2>/dev/null; }
 trap cleanup EXIT
-stop_all() { for p in "${PIDS[@]}"; do kill "$p" 2>/dev/null; done; wait 2>/dev/null; PIDS=(); }
+stop_all() { for p in ${PIDS[@]+"${PIDS[@]}"}; do kill "$p" 2>/dev/null; done; wait 2>/dev/null; PIDS=(); }
 
 measure() { # measure <url> <extra oha flags...>  -> "rps p50 p99 success"
   local url="$1"; shift
-  oha -z "$DURATION" -c "$CONNS" --no-tui --output-format json "$@" "$url" 2>/dev/null | python3 -c '
-import json,sys
-d=json.load(sys.stdin); s=d["summary"]; l=d["latencyPercentiles"]; st=d["statusCodeDistribution"]
-tot=sum(st.values()); ok=st.get("200",0)
-print(f"{s[\"requestsPerSec\"]:.0f} {l[\"p50\"]*1000:.3f} {l[\"p99\"]*1000:.3f} {ok/tot*100 if tot else 0:.1f}")'
+  oha -z "$DURATION" -c "$CONNS" --no-tui --output-format json "$@" "$url" 2>/dev/null | python3 "$ROOT/bench/measure.py"
 }
 
 rss_mb() { ps -o rss= -p "$1" 2>/dev/null | awk '{printf "%.1f", $1/1024}'; }
 
 ROWS=()
 row() { # row <name> <rps p50 p99 ok> <rss>
-  ROWS+=("$(printf '%-26s %10s %9s %9s %7s%% %8s' "$1" $2 "$3")")
-  echo "  -> $1: $2 rss=${3}MB"
+  local rps p50 p99 okp
+  read -r rps p50 p99 okp <<< "${2:-? ? ? ?}"
+  ROWS+=("$(printf '%-26s %10s %9s %9s %7s%% %8s' "$1" "$rps" "$p50" "$p99" "$okp" "$3")")
+  echo "  -> $1: rps=$rps p50=${p50}ms p99=${p99}ms ok=${okp}% rss=${3}MB"
 }
 
 start_origin() { "$ORIGIN" -l 127.0.0.1:13000 "$@" >/dev/null 2>&1 & PIDS+=($!); }
