@@ -18,7 +18,9 @@ pub mod tls;
 pub mod upstream;
 
 pub use ctx::Ctx;
-pub use module::{AdminEndpoint, BuildCtx, Flow, Module, ModuleFactory, Phases, Registry};
+pub use module::{
+    write_response_header, AdminEndpoint, BuildCtx, Flow, Module, ModuleFactory, Phases, Registry,
+};
 
 // Re-exports for modules.
 pub use anyhow;

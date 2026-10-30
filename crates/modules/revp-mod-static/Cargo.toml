@@ -1,0 +1,13 @@
+[package]
+name = "revp-mod-static"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "revp module: serve files from a directory"
+
+[dependencies]
+revp-core = { path = "../../revp-core" }
+serde = { workspace = true }
+tokio = { workspace = true }
+httpdate = { workspace = true }
+percent-encoding = { workspace = true }

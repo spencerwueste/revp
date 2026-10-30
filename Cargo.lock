@@ -2112,6 +2112,7 @@ dependencies = [
  "revp-mod-headers",
  "revp-mod-metrics",
  "revp-mod-ratelimit",
+ "revp-mod-static",
  "tokio",
 ]
 
@@ -2201,8 +2202,12 @@ dependencies = [
 name = "revp-mod-metrics"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "parking_lot 0.12.5",
+ "percent-encoding",
  "revp-core",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -2213,6 +2218,17 @@ dependencies = [
  "parking_lot 0.12.5",
  "revp-core",
  "serde",
+]
+
+[[package]]
+name = "revp-mod-static"
+version = "0.1.0"
+dependencies = [
+ "httpdate",
+ "percent-encoding",
+ "revp-core",
+ "serde",
+ "tokio",
 ]
 
 [[package]]

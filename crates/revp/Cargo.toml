@@ -12,13 +12,14 @@ path = "src/main.rs"
 [features]
 # Bare proxy: routing, load balancing, health checks, TLS, L4, hot reload.
 default = ["full"]
-full = ["metrics", "accesslog", "ratelimit", "headers", "cache", "compress", "acme"]
+full = ["metrics", "accesslog", "ratelimit", "headers", "cache", "compress", "static", "acme"]
 metrics = ["dep:revp-mod-metrics"]
 accesslog = ["dep:revp-mod-accesslog"]
 ratelimit = ["dep:revp-mod-ratelimit"]
 headers = ["dep:revp-mod-headers"]
 cache = ["dep:revp-mod-cache"]
 compress = ["dep:revp-mod-compress"]
+static = ["dep:revp-mod-static"]
 acme = ["dep:revp-acme"]
 
 [dependencies]
@@ -29,6 +30,7 @@ revp-mod-ratelimit = { path = "../modules/revp-mod-ratelimit", optional = true }
 revp-mod-headers = { path = "../modules/revp-mod-headers", optional = true }
 revp-mod-cache = { path = "../modules/revp-mod-cache", optional = true }
 revp-mod-compress = { path = "../modules/revp-mod-compress", optional = true }
+revp-mod-static = { path = "../modules/revp-mod-static", optional = true }
 revp-acme = { path = "../revp-acme", optional = true }
 tokio = { workspace = true }
 anyhow = { workspace = true }

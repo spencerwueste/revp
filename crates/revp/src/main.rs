@@ -48,6 +48,8 @@ fn registry() -> Registry {
     r.register(revp_mod_cache::CacheFactory);
     #[cfg(feature = "compress")]
     r.register(revp_mod_compress::CompressFactory);
+    #[cfg(feature = "static")]
+    r.register(revp_mod_static::StaticFactory);
     r
 }
 

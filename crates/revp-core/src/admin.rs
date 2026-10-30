@@ -75,7 +75,8 @@ impl ServeHttp for AdminApp {
             }
             _ => {
                 if let Some(ep) = self.endpoints.iter().find(|e| e.path == path) {
-                    let body = (ep.handler)();
+                    let query = session.req_header().uri.query().unwrap_or("");
+                    let body = (ep.handler)(query);
                     return Self::respond(StatusCode::OK, ep.content_type, body);
                 }
                 let mut list = String::from("revp admin\n\n/healthz\n/upstreams\n/config/generation\nPOST /reload\n");

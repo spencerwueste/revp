@@ -4,7 +4,7 @@ A lean, modular reverse proxy built on [Pingora](https://github.com/cloudflare/p
 
 The core does one thing: accept HTTP/1.1, HTTP/2, WebSocket, gRPC and raw TCP,
 pick a backend, and forward. Everything else — metrics, access logs, rate
-limiting, header rewriting, caching, compression, ACME — is a **module**:
+limiting, header rewriting, caching, compression, static files, ACME — is a **module**:
 compiled in with a Cargo feature, switched on per route from config, and absent
 from the hot path when a route doesn't use it.
 
@@ -70,7 +70,9 @@ See [`examples/revp.toml`](examples/revp.toml) for every option with its default
 ## Configuration model
 
 - **`[[listeners]]`** — fixed at startup. Plain or `tls = true` (HTTP/2 via ALPN by default).
-  Changing listeners needs a restart or `--upgrade`.
+  Changing listeners needs a restart or `--upgrade`. `redirect_https = true` on a plain
+  listener answers every routed request with a 308 to the same URL on the TLS listener
+  (ACME challenges are still served there).
 - **`[tls].certs`** — PEM cert/key pairs with the SNI names they serve
   (`*.example.com` wildcards supported). Reloaded live.
 - **`[acme]`** — HTTP-01 against Let's Encrypt (or any directory URL). Certs land in
@@ -99,6 +101,7 @@ In-flight requests finish on the generation they started with.
 | `headers` | upstream-request, response | Static set/remove, pre-parsed at load |
 | `cache` | cache | In-memory LRU store (pingora-cache), honors `Cache-Control`, per-route TTL/key, request collapsing |
 | `compress` | early-request | gzip / brotli / zstd via Pingora's streaming encoder, per-algorithm levels |
+| `static` | request | Serves files from a directory: index files, SPA fallback, ETag/`304`, per-path headers, traversal and symlink guards. A route using it may omit `upstream`; with one, misses are proxied |
 
 Writing your own: [`docs/MODULES.md`](docs/MODULES.md).
 

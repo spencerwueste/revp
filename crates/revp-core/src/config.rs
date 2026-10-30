@@ -80,6 +80,9 @@ pub struct ListenerCfg {
     pub reuseport: bool,
     pub tcp_fastopen: Option<usize>,
     pub ipv6_only: Option<bool>,
+    /// Plain listeners only: answer every routed request with a 308 to the
+    /// same URL on the first TLS listener. ACME challenges are still served.
+    pub redirect_https: bool,
 }
 
 impl Default for ListenerCfg {
@@ -91,6 +94,7 @@ impl Default for ListenerCfg {
             reuseport: false,
             tcp_fastopen: None,
             ipv6_only: None,
+            redirect_https: false,
         }
     }
 }
@@ -284,6 +288,7 @@ pub struct RouteCfg {
     pub hosts: Vec<String>,
     /// Path patterns. `/api/*` or `/api/{*rest}` are catch-alls; `/users/{id}` captures.
     pub paths: Vec<String>,
+    /// Backend to proxy to. May be empty when a module answers on its own (`static`).
     pub upstream: String,
     /// Remove this prefix from the path before forwarding.
     pub strip_prefix: Option<String>,
@@ -368,6 +373,14 @@ impl Config {
                 .with_context(|| format!("listener addr {:?}", l.addr))?;
         }
         let has_tls_listener = self.listeners.iter().any(|l| l.tls);
+        for l in self.listeners.iter().filter(|l| l.redirect_https) {
+            if l.tls {
+                bail!("listener {:?}: redirect_https only applies to plain listeners", l.addr);
+            }
+            if !has_tls_listener {
+                bail!("listener {:?}: redirect_https needs a TLS listener to send clients to", l.addr);
+            }
+        }
         let acme_on = self.acme.as_ref().is_some_and(|a| a.enabled);
         if has_tls_listener && self.tls.certs.is_empty() && !acme_on {
             bail!("a TLS listener is configured but [tls] has no certs and ACME is off");
@@ -403,7 +416,8 @@ impl Config {
         }
         for (i, r) in self.routes.iter().enumerate() {
             let label = r.name.clone().unwrap_or_else(|| format!("route-{i}"));
-            if !self.upstreams.contains_key(&r.upstream) {
+            // An empty upstream is checked in Router::build, once modules exist.
+            if !r.upstream.is_empty() && !self.upstreams.contains_key(&r.upstream) {
                 bail!("route {label:?} references unknown upstream {:?}", r.upstream);
             }
             if r.paths.is_empty() {
@@ -453,6 +467,27 @@ pub fn normalize_path_pattern(p: &str) -> String {
         "/{*rest}".to_string()
     } else {
         p.to_string()
+    }
+}
+
+impl Config {
+    /// The redirecting plain listener that accepted a connection on `local`, if any.
+    pub fn redirect_listener(&self, local: std::net::SocketAddr) -> Option<&ListenerCfg> {
+        self.listeners.iter().find(|l| {
+            l.redirect_https
+                && l.addr.parse::<std::net::SocketAddr>().is_ok_and(|a| {
+                    a.port() == local.port() && (a.ip().is_unspecified() || a.ip() == local.ip())
+                })
+        })
+    }
+
+    /// Port of the first TLS listener, where `redirect_https` sends clients.
+    pub fn https_port(&self) -> Option<u16> {
+        self.listeners
+            .iter()
+            .find(|l| l.tls)
+            .and_then(|l| l.addr.parse::<std::net::SocketAddr>().ok())
+            .map(|a| a.port())
     }
 }
 
@@ -519,5 +554,27 @@ mod tests {
     fn path_normalization() {
         assert_eq!(normalize_path_pattern("/api/*"), "/api/{*rest}");
         assert_eq!(normalize_path_pattern("/x/{id}"), "/x/{id}");
+    }
+
+    #[test]
+    fn redirect_https_validated() {
+        let base = |extra: &str| {
+            format!(
+                r#"
+                [[listeners]]
+                addr = "0.0.0.0:80"
+                redirect_https = true
+                {extra}
+                [tls]
+                certs = [{{ cert = "c.pem", key = "k.pem" }}]
+                "#
+            )
+        };
+        let err = Config::parse(&base("")).unwrap_err();
+        assert!(err.to_string().contains("needs a TLS listener"));
+        let cfg = Config::parse(&base("[[listeners]]\naddr = \"0.0.0.0:8443\"\ntls = true")).unwrap();
+        assert_eq!(cfg.https_port(), Some(8443));
+        assert!(cfg.redirect_listener("10.0.0.5:80".parse().unwrap()).is_some());
+        assert!(cfg.redirect_listener("10.0.0.5:8443".parse().unwrap()).is_none());
     }
 }

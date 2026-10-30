@@ -103,6 +103,9 @@ impl Router {
         for (i, rc) in cfg.routes.iter().enumerate() {
             let name = rc.name.clone().unwrap_or_else(|| format!("route-{i}"));
             let pipeline = build_pipeline(rc, &name)?;
+            if rc.upstream.is_empty() && !pipeline.all.iter().any(|m| m.serves()) {
+                anyhow::bail!("route {name:?} has no upstream and no module that serves on its own");
+            }
             let host_header = match rc.host_header.as_str() {
                 "preserve" => HostHeader::Preserve,
                 "upstream" => HostHeader::Upstream,

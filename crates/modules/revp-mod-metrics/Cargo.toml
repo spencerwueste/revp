@@ -8,3 +8,7 @@ description = "revp module: per-route request metrics served on /metrics in Prom
 [dependencies]
 revp-core = { path = "../../revp-core" }
 parking_lot = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+percent-encoding = { workspace = true }
+base64 = "0.22"

@@ -1,0 +1,3 @@
+node_modules
+# dist/index.html is committed: revp embeds it, so building revp needs no Node.
+tsconfig.tsbuildinfo

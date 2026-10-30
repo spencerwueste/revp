@@ -1,3 +1,5 @@
 target/
 bench/results/
 *.log
+bench/certs/
+examples/beam_core.toml

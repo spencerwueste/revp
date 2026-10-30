@@ -13,6 +13,7 @@ watch_config = true                  # hot reload when this file changes (SIGHUP
 # ---- listeners (fixed at startup; change = restart or --upgrade) ----
 [[listeners]]
 addr = "0.0.0.0:80"
+redirect_https = true                # 308 everything to https:// (ACME challenges still served)
 
 [[listeners]]
 addr = "0.0.0.0:443"

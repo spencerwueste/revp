@@ -14,7 +14,7 @@ use std::time::Instant;
 use parking_lot::Mutex;
 use revp_core::{
     async_trait, parse_module_config, BuildCtx, Ctx, Flow, Module, ModuleFactory, Phases,
-    ResponseHeader, Result, Session,
+    ResponseHeader, Result, Session, write_response_header,
 };
 use serde::Deserialize;
 
@@ -182,8 +182,7 @@ impl Module for RateLimit {
                 h.insert_header("x-ratelimit-limit", self.rps.to_string())?;
                 h.insert_header("content-length", "0")?;
                 h.insert_header("cache-control", "no-store")?;
-                s.write_response_header(Box::new(h), true).await?;
-                cx.status = self.status;
+                write_response_header(s, h, true, cx).await?;
                 cx.short_circuit = Some("ratelimit");
                 Ok(Flow::Done)
             }

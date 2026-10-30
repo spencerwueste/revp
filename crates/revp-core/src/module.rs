@@ -69,6 +69,12 @@ pub trait Module: Send + Sync + 'static {
     fn name(&self) -> &'static str;
     fn phases(&self) -> Phases;
 
+    /// True if this module can answer requests on its own (e.g. a file server),
+    /// so a route using it may leave `upstream` unset.
+    fn serves(&self) -> bool {
+        false
+    }
+
     /// Runs before Pingora's downstream modules. Cannot respond; only configure.
     fn on_early_request(&self, _session: &mut Session, _cx: &mut Ctx) {}
 
@@ -127,6 +133,26 @@ pub trait Module: Send + Sync + 'static {
     }
 }
 
+/// Write a response header from a request-phase hook (`Flow::Done`).
+///
+/// Pingora skips `response_filter` for responses written in `request_filter`, so
+/// this runs the route's response modules (headers etc.) first, then writes.
+/// Records the status in `cx`.
+pub async fn write_response_header(
+    session: &mut Session,
+    mut resp: ResponseHeader,
+    end_of_stream: bool,
+    cx: &mut Ctx,
+) -> Result<()> {
+    if let Some(route) = cx.route.clone() {
+        for m in route.pipeline.response.iter() {
+            m.on_response(session, &mut resp, cx).await?;
+        }
+    }
+    cx.status = resp.status.as_u16();
+    session.write_response_header(Box::new(resp), end_of_stream).await
+}
+
 /// Context handed to a factory when it builds a module for one route.
 pub struct BuildCtx<'a> {
     pub config: &'a Config,
@@ -154,11 +180,12 @@ pub trait ModuleFactory: Send + Sync {
     }
 }
 
-/// A handler on the admin listener, e.g. `/metrics`.
+/// A handler on the admin listener, e.g. `/metrics`. Matched on the exact path;
+/// the handler gets the raw query string (`""` when there is none).
 pub struct AdminEndpoint {
     pub path: &'static str,
     pub content_type: &'static str,
-    pub handler: Arc<dyn Fn() -> Vec<u8> + Send + Sync>,
+    pub handler: Arc<dyn Fn(&str) -> Vec<u8> + Send + Sync>,
 }
 
 /// All compiled-in module factories, registered by the binary.

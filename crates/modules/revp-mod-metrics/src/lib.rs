@@ -4,6 +4,17 @@
 //! in-flight requests per route using plain atomics (no locks on the hot path).
 //! Rendered in Prometheus text format on the admin listener at `/metrics`.
 //! Counters live in a process-wide registry so they survive config reloads.
+//!
+//! Optionally it also keeps the most recent requests in memory and serves a
+//! dashboard over them on the admin listener at `/dashboard`:
+//!
+//! ```toml
+//! [defaults.modules.metrics]
+//! requests = 50000                         # keep the newest 50k; 0 (default) = off
+//! user_claims = ["email", "name", "sub"]   # JWT claims tried, in order, for the user
+//! ```
+
+pub mod requests;
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -12,10 +23,33 @@ use std::sync::{Arc, LazyLock};
 use std::time::Instant;
 
 use parking_lot::RwLock;
+use revp_core::http::Version;
 use revp_core::{
-    async_trait, AdminEndpoint, BuildCtx, Ctx, Error, Flow, Module, ModuleFactory, Phases, Result,
-    Session,
+    async_trait, parse_module_config, AdminEndpoint, BuildCtx, Ctx, Error, Flow, Module,
+    ModuleFactory, Phases, Result, Session,
 };
+use serde::Deserialize;
+
+/// The dashboard, built from `dashboard/` (`npm run build`) into one file.
+static DASHBOARD_HTML: &[u8] = include_bytes!("../dashboard/dist/index.html");
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+struct Cfg {
+    /// Recent requests to keep for the dashboard. 0 = don't record this route.
+    requests: usize,
+    /// JWT claims tried in order to name the user of a request.
+    user_claims: Vec<String>,
+}
+
+impl Default for Cfg {
+    fn default() -> Self {
+        Self {
+            requests: 0,
+            user_claims: vec!["email".into(), "preferred_username".into(), "name".into(), "sub".into()],
+        }
+    }
+}
 
 /// Histogram bucket upper bounds in microseconds (0.5ms .. 10s).
 const BUCKETS_US: [u64; 14] = [
@@ -156,6 +190,87 @@ pub fn render() -> Vec<u8> {
 
 pub struct MetricsModule {
     m: Arc<RouteMetrics>,
+    record: bool,
+    user_claims: Vec<String>,
+}
+
+fn proto(v: Version) -> &'static str {
+    match v {
+        Version::HTTP_09 => "HTTP/0.9",
+        Version::HTTP_10 => "HTTP/1.0",
+        Version::HTTP_11 => "HTTP/1.1",
+        Version::HTTP_2 => "HTTP/2",
+        Version::HTTP_3 => "HTTP/3",
+        _ => "HTTP/?",
+    }
+}
+
+impl MetricsModule {
+    fn record(&self, s: &Session, e: Option<&Error>, cx: &Ctx, us: u64) {
+        let req = s.req_header();
+        let header = |n: &str| {
+            req.headers
+                .get(n)
+                .and_then(|v| v.to_str().ok())
+                .map(|v| v.chars().take(300).collect::<String>())
+        };
+        let upgrade = req
+            .headers
+            .get("upgrade")
+            .is_some_and(|v| v.as_bytes().eq_ignore_ascii_case(b"websocket"));
+        let grpc = req
+            .headers
+            .get("content-type")
+            .is_some_and(|v| v.as_bytes().starts_with(b"application/grpc"));
+        let kind = if upgrade {
+            "websocket"
+        } else if grpc {
+            "grpc"
+        } else if cx.short_circuit == Some("static") {
+            "static"
+        } else {
+            "http"
+        };
+        let upstream_name = cx.route.as_ref().map(|r| r.upstream.as_str()).unwrap_or("");
+        let service = match cx.short_circuit {
+            Some(by) => by.to_string(),
+            None if !upstream_name.is_empty() => upstream_name.to_string(),
+            None => "-".to_string(),
+        };
+        let ts = std::time::SystemTime::now()
+            .checked_sub(cx.elapsed())
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        requests::push(requests::Rec {
+            id: requests::next_id(),
+            ts,
+            method: req.method.as_str().to_string(),
+            host: revp_core::router::request_host(req).map(String::from),
+            path: req.uri.path().to_string(),
+            query: req.uri.query().map(requests::cut_query),
+            status: cx.status,
+            duration_ms: us as f64 / 1000.0,
+            bytes_in: s.body_bytes_read() as u64,
+            bytes_out: s.body_bytes_sent() as u64,
+            route: cx.route_name().to_string(),
+            service,
+            upstream: cx.upstream_addr.map(|a| a.to_string()),
+            client: s.client_addr().and_then(|a| a.as_inet()).map(|a| a.ip().to_string()),
+            user: req
+                .headers
+                .get("authorization")
+                .and_then(|v| requests::jwt_user(v.as_bytes(), &self.user_claims)),
+            kind,
+            by: cx.short_circuit,
+            error: e.map(|e| e.to_string()),
+            user_agent: header("user-agent"),
+            referer: header("referer"),
+            tls: s.digest().and_then(|d| d.ssl_digest.as_ref()).is_some(),
+            proto: proto(req.version),
+            cache: s.cache.enabled().then(|| s.cache.phase().as_str()),
+        });
+    }
 }
 
 #[async_trait]
@@ -201,6 +316,9 @@ impl Module for MetricsModule {
             };
             self.m.cache[i].fetch_add(1, Relaxed);
         }
+        if self.record {
+            self.record(s, e, cx, us);
+        }
     }
 }
 
@@ -215,19 +333,46 @@ impl ModuleFactory for MetricsFactory {
     }
     fn build(
         &self,
-        _cfg: &revp_core::toml::Table,
+        cfg: &revp_core::toml::Table,
         bcx: &BuildCtx<'_>,
     ) -> revp_core::anyhow::Result<Arc<dyn Module>> {
+        let c: Cfg = parse_module_config(cfg)?;
+        requests::reserve(c.requests);
         Ok(Arc::new(MetricsModule {
             m: route_metrics(bcx.route_name),
+            record: c.requests > 0,
+            user_claims: c.user_claims,
         }))
     }
     fn admin_endpoints(&self) -> Vec<AdminEndpoint> {
-        vec![AdminEndpoint {
-            path: "/metrics",
-            content_type: "text/plain; version=0.0.4; charset=utf-8",
-            handler: Arc::new(render),
-        }]
+        let html = || -> Arc<dyn Fn(&str) -> Vec<u8> + Send + Sync> {
+            Arc::new(|_| DASHBOARD_HTML.to_vec())
+        };
+        let json = "application/json";
+        vec![
+            AdminEndpoint {
+                path: "/metrics",
+                content_type: "text/plain; version=0.0.4; charset=utf-8",
+                handler: Arc::new(|_| render()),
+            },
+            AdminEndpoint { path: "/dashboard", content_type: "text/html; charset=utf-8", handler: html() },
+            AdminEndpoint { path: "/dashboard/", content_type: "text/html; charset=utf-8", handler: html() },
+            AdminEndpoint {
+                path: "/dashboard/api/requests",
+                content_type: json,
+                handler: Arc::new(requests::query_requests),
+            },
+            AdminEndpoint {
+                path: "/dashboard/api/users",
+                content_type: json,
+                handler: Arc::new(requests::query_users),
+            },
+            AdminEndpoint {
+                path: "/dashboard/api/request",
+                content_type: json,
+                handler: Arc::new(requests::query_one),
+            },
+        ]
     }
 }
 

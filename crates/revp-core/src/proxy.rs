@@ -70,6 +70,37 @@ impl RevpProxy {
         cx.short_circuit = Some("acme");
         Ok(true)
     }
+
+    /// 308 to the same host and path on the TLS listener, when this request
+    /// arrived on a plain listener with `redirect_https`.
+    async fn redirect_to_https(&self, session: &mut Session, cx: &mut Ctx) -> Result<bool> {
+        if Self::is_tls(session) {
+            return Ok(false);
+        }
+        let Some(local) = session.server_addr().and_then(|a| a.as_inet()).copied() else {
+            return Ok(false);
+        };
+        let location = {
+            let rt = self.shared.runtime();
+            if rt.config.redirect_listener(local).is_none() {
+                return Ok(false);
+            }
+            let req = session.req_header();
+            let Some(host) = request_host(req) else { return Ok(false) };
+            let pq = req.uri.path_and_query().map(|p| p.as_str()).unwrap_or("/");
+            match rt.config.https_port() {
+                Some(443) | None => format!("https://{host}{pq}"),
+                Some(port) => format!("https://{host}:{port}{pq}"),
+            }
+        };
+        let mut h = ResponseHeader::build(308, Some(2))?;
+        h.insert_header("location", location)?;
+        h.insert_header("content-length", "0")?;
+        session.write_response_header(Box::new(h), true).await?;
+        cx.status = 308;
+        cx.short_circuit = Some("https_redirect");
+        Ok(true)
+    }
 }
 
 #[async_trait]
@@ -115,6 +146,10 @@ impl ProxyHttp for RevpProxy {
             session.respond_error(404).await?;
             return Ok(true);
         };
+
+        if self.redirect_to_https(session, cx).await? {
+            return Ok(true);
+        }
 
         for m in route.pipeline.request.iter() {
             if m.on_request(session, cx).await? == Flow::Done {

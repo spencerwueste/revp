@@ -86,7 +86,8 @@ Within a phase, modules run in ascending `priority()`:
 | 100–199 | access control       | ratelimit (100)        |
 | 200–299 | rewriting            | headers (250)          |
 | 300–399 | caching              | cache (300)            |
-| 400+    | encoding             | compress (400)         |
+| 400–499 | encoding             | compress (400)         |
+| 500+    | serving              | static (500)           |
 
 ## Rules that keep the hot path lean
 
@@ -99,8 +100,13 @@ Within a phase, modules run in ascending `priority()`:
 - State that must survive config reloads (counters, buckets) lives in a
   process-wide `static`, keyed by route name. Module instances are rebuilt on
   every reload.
-- `Flow::Done` means you already wrote the full response. Set `cx.status` and
-  `cx.short_circuit` so logs/metrics stay correct.
+- `Flow::Done` means you already wrote the full response. Write its header with
+  `revp_core::write_response_header`, not `session.write_response_header`: Pingora
+  skips `response_filter` for responses written in `request_filter`, and the helper
+  runs the route's response modules (headers) and records `cx.status`. Set
+  `cx.short_circuit` if you want a label other than the module name.
+- A module that answers requests by itself (a file server) returns `true` from
+  `Module::serves()`; only then may its route leave `upstream` unset.
 
 ## Admin endpoints
 
