@@ -273,7 +273,8 @@ EOF
 for _ in $(seq 1 30); do [[ "$(curl -sS $A/config/generation)" != "$gen0" ]] && break; sleep 0.2; done
 expect_contains "generation bumped on file change" "$((gen0+1))" "$(curl -sS $A/config/generation)"
 expect_contains "new route live" "20000" "$(curl -sS -o /dev/null -w '%{size_download}' -H 'Host: reload.test' $H/)"
-kill -HUP "$REVP_PID"; sleep 0.5
+kill -HUP "$REVP_PID"
+for _ in $(seq 1 30); do [[ "$(curl -sS $A/config/generation)" == "$((gen0+2))" ]] && break; sleep 0.2; done
 expect_contains "SIGHUP reloads" "$((gen0+2))" "$(curl -sS $A/config/generation)"
 printf '\n[[routes]]\nupstream = "nope"\n' >> "$TMP/revp.toml"; sleep 0.8
 expect_contains "bad config rejected, old kept" "$((gen0+2))" "$(curl -sS $A/config/generation)"
