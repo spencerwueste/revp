@@ -129,6 +129,25 @@ pub struct AcmeCfg {
     pub ca_root: Option<PathBuf>,
     pub storage: PathBuf,
     pub renew_before_days: u32,
+    /// How the CA checks we control a domain. See [`AcmeChallenge`].
+    pub challenge: AcmeChallenge,
+}
+
+/// ACME challenge type.
+///
+/// `http-01` answers on a plain listener (port 80). `tls-alpn-01` answers
+/// inside the TLS handshake on a TLS listener (port 443), for hosts where 80 is
+/// closed. `auto` uses whichever listeners exist; with both, it starts with
+/// `http-01` and switches type after a failed attempt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AcmeChallenge {
+    #[default]
+    Auto,
+    #[serde(rename = "http-01")]
+    Http01,
+    #[serde(rename = "tls-alpn-01")]
+    TlsAlpn01,
 }
 
 impl Default for AcmeCfg {
@@ -142,6 +161,7 @@ impl Default for AcmeCfg {
             ca_root: None,
             storage: "/var/lib/revp/acme".into(),
             renew_before_days: 30,
+            challenge: AcmeChallenge::Auto,
         }
     }
 }
@@ -393,8 +413,18 @@ impl Config {
                 if acme.email.is_empty() {
                     bail!("[acme] needs an email");
                 }
-                if !self.listeners.iter().any(|l| !l.tls) {
-                    bail!("[acme] HTTP-01 needs a plain (non-TLS) listener, normally on port 80");
+                let has_plain_listener = self.listeners.iter().any(|l| !l.tls);
+                match acme.challenge {
+                    AcmeChallenge::Http01 if !has_plain_listener => bail!(
+                        "[acme] challenge = \"http-01\" needs a plain (non-TLS) listener, normally on port 80"
+                    ),
+                    AcmeChallenge::TlsAlpn01 if !has_tls_listener => bail!(
+                        "[acme] challenge = \"tls-alpn-01\" needs a TLS listener, normally on port 443"
+                    ),
+                    AcmeChallenge::Auto if !has_plain_listener && !has_tls_listener => {
+                        bail!("[acme] needs a plain listener (port 80) or a TLS listener (port 443)")
+                    }
+                    _ => {}
                 }
             }
         }
@@ -524,6 +554,40 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.to_string().contains("unknown upstream"));
+    }
+
+    #[test]
+    fn acme_challenge_needs_matching_listener() {
+        let cfg = |listeners: &str, challenge: &str| {
+            Config::parse(&format!(
+                r#"
+                {listeners}
+                [acme]
+                email = "a@example.com"
+                domains = ["example.com"]
+                {challenge}
+                [upstreams.app]
+                servers = ["127.0.0.1:3000"]
+                [[routes]]
+                upstream = "app"
+                "#
+            ))
+        };
+        let plain = "[[listeners]]\naddr = \"0.0.0.0:80\"";
+        let tls = "[[listeners]]\naddr = \"0.0.0.0:443\"\ntls = true";
+
+        // auto: either listener is enough
+        assert_eq!(cfg(tls, "").unwrap().acme.unwrap().challenge, AcmeChallenge::Auto);
+        assert!(cfg(plain, "").is_ok());
+        assert_eq!(
+            cfg(tls, "challenge = \"tls-alpn-01\"").unwrap().acme.unwrap().challenge,
+            AcmeChallenge::TlsAlpn01
+        );
+        let e = cfg(plain, "challenge = \"tls-alpn-01\"").unwrap_err();
+        assert!(e.to_string().contains("needs a TLS listener"), "{e}");
+        let e = cfg(tls, "challenge = \"http-01\"").unwrap_err();
+        assert!(e.to_string().contains("needs a plain"), "{e}");
+        assert!(cfg(tls, "challenge = \"dns-01\"").is_err());
     }
 
     #[test]

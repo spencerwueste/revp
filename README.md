@@ -27,12 +27,12 @@ clients ──TLS──► │ listeners ─► router ─► per-route pipeline
 | M2 | Module API (phases, priorities, per-route pipelines), `metrics`, `accesslog`, `headers` | ✅ |
 | M3 | Hot reload (file watch + SIGHUP + `POST /reload`), graceful shutdown, zero-downtime upgrade (Linux), systemd unit, Containerfile, Quadlet | ✅ |
 | M4 | `ratelimit`, `cache`, `compress` | ✅ |
-| M5 | ACME HTTP-01 (Let's Encrypt), L4 TCP proxy | ✅ |
+| M5 | ACME HTTP-01 and TLS-ALPN-01 (Let's Encrypt), L4 TCP proxy | ✅ |
 | M6 | Hardening + benchmarks | ✅ benchmarks below; TLS-backend comparison deferred (see *Not done*) |
 
-Tests: 14 unit tests (`cargo test --workspace`), 37 end-to-end checks
-(`test/integration.sh`), and a live ACME issuance against Pebble in Docker
-(`test/acme-pebble.sh`).
+Tests: 30 unit tests (`cargo test --workspace`), 67 end-to-end checks
+(`test/integration.sh`), and live ACME issuance against Pebble in Docker for both
+challenge types (`test/acme-pebble.sh`).
 
 ## Quick start
 
@@ -75,9 +75,14 @@ See [`examples/revp.toml`](examples/revp.toml) for every option with its default
   (ACME challenges are still served there).
 - **`[tls].certs`** — PEM cert/key pairs with the SNI names they serve
   (`*.example.com` wildcards supported). Reloaded live.
-- **`[acme]`** — HTTP-01 against Let's Encrypt (or any directory URL). Certs land in
+- **`[acme]`** — Let's Encrypt (or any directory URL). Certs land in
   `storage/<domain>/`, renew `renew_before_days` before expiry, and are installed into
-  the TLS resolver without a restart. Needs a plain listener on :80.
+  the TLS resolver without a restart. `challenge` picks how the CA checks the domain:
+  `http-01` answers on a plain listener (:80), `tls-alpn-01` answers inside the TLS
+  handshake on :443 so port 80 can stay closed, and `auto` (default) uses whichever
+  listeners exist, starting with HTTP-01 and switching type after a failed attempt.
+  TLS-ALPN-01 checks are answered before the normal handshake and only while one is
+  pending; Pingora logs each one as a "handshake error" that says it was expected.
 - **`[upstreams.<name>]`** — static `ip:port` list with weights, LB algorithm, TLS to backend,
   `http_version = "2"` for gRPC/h2c, timeouts, and an optional health check.
 - **`[[routes]]`** — matched by host (exact → `*.wildcard` → any), then longest path

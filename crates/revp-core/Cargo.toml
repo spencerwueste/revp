@@ -28,3 +28,6 @@ env_logger = { workspace = true }
 humantime-serde = { workspace = true }
 parking_lot = { workspace = true }
 notify = { workspace = true }
+
+[dev-dependencies]
+rcgen = { version = "0.14", default-features = false, features = ["ring", "pem"] }

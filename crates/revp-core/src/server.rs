@@ -13,7 +13,7 @@ use pingora_core::server::Server;
 use pingora_core::services::background::background_service;
 use pingora_core::services::listening::Service;
 
-use crate::acme::AcmeChallenges;
+use crate::acme::{AcmeChallenges, AlpnChallengeResponder};
 use crate::admin::AdminApp;
 use crate::config::Config;
 use crate::l4::L4Proxy;
@@ -149,6 +149,14 @@ pub fn run(
                 http.add_tcp_with_settings(&l.addr, so);
                 info!("listening http://{}", l.addr);
             }
+        }
+        // TLS-ALPN-01 answers come from a pre-handshake hook, so they need no
+        // ALPN entry in the listener's own TLS config. The ACME service only
+        // starts when [acme] is enabled at boot, so that is the only case
+        // where a challenge can ever be pending.
+        if cfg.acme.as_ref().is_some_and(|a| a.enabled) && cfg.listeners.iter().any(|l| l.tls) {
+            http.endpoints()
+                .set_pre_tls_callback(Arc::new(AlpnChallengeResponder::new(shared.acme.clone())));
         }
         server.add_service(http);
     }

@@ -34,6 +34,8 @@ domains = ["example.com", "www.example.com"]
 staging = false                      # true while testing (no rate limits, untrusted certs)
 storage = "/var/lib/revp/acme"
 renew_before_days = 30
+challenge = "auto"                   # "http-01" (port 80), "tls-alpn-01" (port 443, no :80 needed),
+                                     # or "auto": whichever listeners exist, switching type on failure
 
 # ---- admin: health, upstream status, /metrics, POST /reload ----
 [admin]

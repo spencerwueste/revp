@@ -8,6 +8,7 @@ license.workspace = true
 revp-core = { path = "../revp-core" }
 instant-acme = { version = "0.8", default-features = false, features = ["ring", "hyper-rustls"] }
 x509-parser = "0.18"
+rcgen = { version = "0.14", default-features = false, features = ["ring", "pem"] }
 tokio = { workspace = true }
 async-trait = { workspace = true }
 anyhow = { workspace = true }

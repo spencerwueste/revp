@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# Live ACME HTTP-01 test against Pebble (Let's Encrypt's test CA) in Docker.
+# Live ACME test against Pebble (Let's Encrypt's test CA) in Docker, once per
+# challenge type: HTTP-01, then TLS-ALPN-01 with no port-80 listener at all.
 #
-# Pebble validates by connecting to <domain>:httpPort. A challtestsrv DNS
-# container answers every name with this host's IP (as seen from Docker), and
-# Pebble's httpPort is set to revp's plain listener. revp must get a cert,
-# store it, install it in the TLS resolver, and serve HTTPS with it.
+# Pebble validates by connecting to <domain>:httpPort or <domain>:tlsPort. A
+# challtestsrv DNS container answers every name with this host's IP (as seen
+# from Docker), and Pebble's ports are set to revp's listeners. revp must get a
+# cert, store it, install it in the TLS resolver, and serve HTTPS with it.
+# MODES="tls-alpn-01" runs one case only.
 #
 #   cargo build --release -p revp -p bench-upstream && test/acme-pebble.sh
 set -uo pipefail
@@ -72,13 +74,25 @@ for _ in $(seq 1 50); do curl -fsSk https://localhost:14000/dir >/dev/null 2>&1 
 curl -fsSk https://localhost:14000/dir >/dev/null || { echo "pebble not up"; docker logs pebble | tail; exit 1; }
 echo "pebble directory up"
 
-cat > "$TMP/revp.toml" <<EOF
+"$ORIGIN" -l 127.0.0.1:13000 >/dev/null 2>&1 & O1=$!
+
+# One revp run per challenge type, each with fresh storage so a new cert is ordered.
+#   http-01:     plain listener on Pebble's httpPort + TLS listener
+#   tls-alpn-01: TLS listener on Pebble's tlsPort only; nothing on port 80
+run_case() {
+  local mode=$1 dir="$TMP/$1"
+  mkdir -p "$dir"
+  local plain_listener='[[listeners]]
+addr = "0.0.0.0:18080"'
+  [[ "$mode" == "tls-alpn-01" ]] && plain_listener=""
+  echo
+  echo "== $mode =="
+  cat > "$dir/revp.toml" <<EOF
 [server]
 log_level = "info"
-pid_file = "$TMP/revp.pid"
-upgrade_sock = "$TMP/upgrade.sock"
-[[listeners]]
-addr = "0.0.0.0:18080"
+pid_file = "$dir/revp.pid"
+upgrade_sock = "$dir/upgrade.sock"
+$plain_listener
 [[listeners]]
 addr = "0.0.0.0:18443"
 tls = true
@@ -87,36 +101,47 @@ email = "test@$DOMAIN"
 domains = ["$DOMAIN"]
 directory = "https://localhost:14000/dir"
 ca_root = "$TMP/pebble-root.pem"
-storage = "$TMP/acme"
+storage = "$dir/acme"
+challenge = "$mode"
 [upstreams.o]
 servers = ["127.0.0.1:13000"]
 [[routes]]
 upstream = "o"
 EOF
 
-"$ORIGIN" -l 127.0.0.1:13000 >/dev/null 2>&1 & O1=$!
-"$REVP" -c "$TMP/revp.toml" >"$TMP/revp.log" 2>&1 & REVP_PID=$!
+  "$REVP" -c "$dir/revp.toml" >"$dir/revp.log" 2>&1 & REVP_PID=$!
 
-echo "waiting for certificate..."
-for _ in $(seq 1 150); do [[ -f "$TMP/acme/$DOMAIN/fullchain.pem" ]] && break; sleep 0.2; done
-if [[ -f "$TMP/acme/$DOMAIN/fullchain.pem" ]]; then ok "certificate obtained and stored"; else fail "certificate obtained" "$(tail -20 "$TMP/revp.log")"; echo "--- pebble ---"; docker logs pebble 2>&1 | tail -20; exit 1; fi
-[[ -f "$TMP/acme/account.json" ]] && ok "account credentials saved" || fail "account credentials saved"
-perm=$(stat -f %Lp "$TMP/acme/$DOMAIN/privkey.pem" 2>/dev/null || stat -c %a "$TMP/acme/$DOMAIN/privkey.pem")
-[[ "$perm" == "600" ]] && ok "private key is 0600" || fail "private key is 0600" "$perm"
-grep -q "acme: $DOMAIN: certificate installed" "$TMP/revp.log" && ok "logged install" || fail "logged install"
+  echo "waiting for certificate..."
+  for _ in $(seq 1 150); do [[ -f "$dir/acme/$DOMAIN/fullchain.pem" ]] && break; sleep 0.2; done
+  if [[ -f "$dir/acme/$DOMAIN/fullchain.pem" ]]; then ok "certificate obtained and stored"; else fail "certificate obtained" "$(tail -20 "$dir/revp.log")"; echo "--- pebble ---"; docker logs pebble 2>&1 | tail -20; kill "$REVP_PID" 2>/dev/null; REVP_PID=""; return; fi
+  [[ -f "$dir/acme/account.json" ]] && ok "account credentials saved" || fail "account credentials saved"
+  perm=$(stat -f %Lp "$dir/acme/$DOMAIN/privkey.pem" 2>/dev/null || stat -c %a "$dir/acme/$DOMAIN/privkey.pem")
+  [[ "$perm" == "600" ]] && ok "private key is 0600" || fail "private key is 0600" "$perm"
+  grep -q "acme: $DOMAIN: certificate installed" "$dir/revp.log" && ok "logged install" || fail "logged install"
+  grep -q "ordering certificate ($mode)" "$dir/revp.log" && ok "ordered with $mode" || fail "ordered with $mode" "$(grep ordering "$dir/revp.log")"
 
-sleep 0.3
-served=$(echo | openssl s_client -connect 127.0.0.1:18443 -servername $DOMAIN 2>/dev/null | openssl x509 -noout -text 2>/dev/null | grep -E "Issuer:|DNS:")
-# ACME certs identify the host in the SAN; the subject is usually empty.
-[[ "$served" == *"DNS:$DOMAIN"* ]] && ok "TLS serves the ACME cert for $DOMAIN (SAN)" || fail "TLS serves the ACME cert" "$served"
-[[ "$served" == *"Pebble"* ]] && ok "issued by Pebble" || fail "issued by Pebble" "$served"
-body=$(curl -sS --cacert "$TMP/pebble-root.pem" --resolve "$DOMAIN:18443:127.0.0.1" "https://$DOMAIN:18443/" 2>&1 || true)
-# Pebble's intermediate is not in minica root chain for curl verification; accept -k but verify the name.
-body=$(curl -sSk --resolve "$DOMAIN:18443:127.0.0.1" "https://$DOMAIN:18443/")
-[[ "$body" == "Hello, world!" ]] && ok "HTTPS request proxied over the new cert" || fail "HTTPS request proxied" "$body"
-chal=$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/.well-known/acme-challenge/nope)
-[[ "$chal" == "200" ]] && ok "unknown challenge token falls through to route" || fail "challenge fall-through" "$chal"
+  sleep 0.3
+  served=$(echo | openssl s_client -connect 127.0.0.1:18443 -servername $DOMAIN 2>/dev/null | openssl x509 -noout -text 2>/dev/null | grep -E "Issuer:|DNS:")
+  # ACME certs identify the host in the SAN; the subject is usually empty.
+  [[ "$served" == *"DNS:$DOMAIN"* ]] && ok "TLS serves the ACME cert for $DOMAIN (SAN)" || fail "TLS serves the ACME cert" "$served"
+  [[ "$served" == *"Pebble"* ]] && ok "issued by Pebble" || fail "issued by Pebble" "$served"
+  # Pebble's intermediate is not in minica root chain for curl verification; accept -k but verify the name.
+  body=$(curl -sSk --resolve "$DOMAIN:18443:127.0.0.1" "https://$DOMAIN:18443/")
+  [[ "$body" == "Hello, world!" ]] && ok "HTTPS request proxied over the new cert" || fail "HTTPS request proxied" "$body"
+  if [[ "$mode" == "http-01" ]]; then
+    chal=$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/.well-known/acme-challenge/nope)
+    [[ "$chal" == "200" ]] && ok "unknown challenge token falls through to route" || fail "challenge fall-through" "$chal"
+  else
+    grep -q "answered tls-alpn-01 challenge" "$dir/revp.log" && ok "answered the challenge inside the TLS handshake" || fail "answered tls-alpn-01" "$(tail -20 "$dir/revp.log")"
+    if lsof -nP -iTCP:18080 -sTCP:LISTEN >/dev/null 2>&1; then fail "nothing listening on the HTTP port"; else ok "nothing listening on the HTTP port"; fi
+  fi
+
+  kill "$REVP_PID" 2>/dev/null; wait "$REVP_PID" 2>/dev/null; REVP_PID=""
+  [[ $FAIL -eq 0 ]] || tail -30 "$dir/revp.log"
+}
+
+for mode in ${MODES:-http-01 tls-alpn-01}; do run_case "$mode"; done
 
 echo
 echo "passed: $PASS  failed: $FAIL"
-[[ $FAIL -eq 0 ]] || { tail -30 "$TMP/revp.log"; exit 1; }
+[[ $FAIL -eq 0 ]] || exit 1

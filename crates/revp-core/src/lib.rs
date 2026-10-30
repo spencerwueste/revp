@@ -33,6 +33,7 @@ pub use pingora_core;
 pub use pingora_error::{Error, ErrorType, Result};
 pub use pingora_http::{RequestHeader, ResponseHeader};
 pub use pingora_proxy::Session;
+pub use rustls;
 pub use serde;
 pub use toml;
 
